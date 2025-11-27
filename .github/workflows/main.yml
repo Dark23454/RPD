@@ -1,23 +1,60 @@
-# Version 2: Using Pinggy.io (SSH-based, optional signup for persistence)
+# .github/workflows/main.yml
+# Version 2: Pinggy.io – fully working on windows-latest
 name: CI
 on: [push, workflow_dispatch]
+
 jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Enable TS
+      - name: Enable Remote Desktop
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-          Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
-      - name: Create Pinggy Tunnel
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+          # Optional: create a local admin user (remove if not needed)
+          $Password = ConvertTo-SecureString "P@ssw0rd!" -AsPlainText -Force
+          New-LocalUser -Name "runneradmin" -Password $Password -FullName "Runner Admin" -Description "Temp admin for RDP" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Administrators" -Member "runneradmin" -ErrorAction SilentlyContinue
+
+      - name: Start Pinggy.io TCP Tunnel
+        shell: pwsh
         run: |
-          # Start tunnel; replace 'your-email' if signed up for persistence
-          ssh -p 443 -R0:localhost:3389 tcp@a.pinggy.io -o ServerAliveInterval=60 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null &
-          # Capture output URL (Pinggy prints it)
-          sleep 3
-          pinggy_url=$(ssh -p 443 -R0:localhost:3389 tcp@a.pinggy.io -o ServerAliveInterval=60 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "echo 'Tunnel active'" 2>&1 | grep -o 'tcp://[a-z0-9-]\+\.pinggy\.io:[0-9]\+')
-          echo "Public RDP URL: $pinggy_url"
-          echo "tunnel_url=$pinggy_url" >> $GITHUB_ENV
+          # Start the tunnel in the background (PowerShell way)
+          $sshCommand = "ssh -p 443 -R0:localhost:3389 tcp@a.pinggy.io -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o UserKnownHostsFile=/dev/null"
+          Start-Job -ScriptBlock { Invoke-Expression $using:sshCommand } | Out-Null
+
+          Write-Host "Waiting for Pinggy to print the public URL..."
+          $timeout = 30
+          $elapsed = 0
+          $url = $null
+
+          while ($elapsed -lt $timeout -and -not $url) {
+            Start-Sleep -Seconds 2
+            $elapsed += 2
+
+            # Run a short-lived SSH command to force Pinggy to print the URL immediately
+            $output = ssh -p 443 -R0:localhost:3389 tcp@a.pinggy.io -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o UserKnownHostsFile=/dev/null 2>&1
+
+            if ($output -match 'tcp://[a-z0-9-]+\.pinggy\.io:[0-9]+') {
+              $url = ($output | Select-String -Pattern 'tcp://[a-z0-9-]+\.pinggy\.io:[0-9]+').Matches.Value
+              break
+            }
+          }
+
+          if ($url) {
+            Write-Host "Public RDP URL → $url"
+            Write-Host "tunnel_url=$url" >> $env:GITHUB_ENV
+            Write-Host "Connect with RDP client to host: $($url -replace 'tcp://', '' -split ':')[0] and port: $($url.Split(':')[-1])"
+          } else {
+            Write-Host "Failed to get Pinggy URL within $timeout seconds"
+            exit 1
+          }
+
+      # Optional: keep job alive for manual RDP access (e.g. 30 minutes)
+      - name: Keep workflow alive (optional)
+        if: success()
+        run: |
+          Write-Host "Workflow will stay alive for 30 minutes so you can RDP in..."
+          Start-Sleep -Seconds 1800  # 30 minutes max
         shell: pwsh
