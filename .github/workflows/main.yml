@@ -1,4 +1,4 @@
-# Version 1: Using Serveo (SSH-based, no signup required)
+# Version 2: Using Pinggy.io (SSH-based, optional signup for persistence)
 name: CI
 on: [push, workflow_dispatch]
 jobs:
@@ -11,13 +11,13 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
           Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
-      - name: Create Serveo Tunnel
+      - name: Create Pinggy Tunnel
         run: |
-          # Start SSH tunnel in background; output public URL
-          ssh -R tunnel:3389:localhost:3389 -o ServerAliveInterval=60 serveo.net -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 &
-          # Wait for URL output and echo it
-          sleep 5
-          ssh_output=$(ssh -R tunnel:3389:localhost:3389 serveo.net -o ServerAliveInterval=60 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "echo 'Tunnel started'" 2>&1 | grep -o 'https\?://[a-z0-9-]\+\.serveo\.net:[0-9]\+')
-          echo "Public RDP URL: $ssh_output"
-          echo "tunnel_url=$ssh_output" >> $GITHUB_ENV
+          # Start tunnel; replace 'your-email' if signed up for persistence
+          ssh -p 443 -R0:localhost:3389 tcp@a.pinggy.io -o ServerAliveInterval=60 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null &
+          # Capture output URL (Pinggy prints it)
+          sleep 3
+          pinggy_url=$(ssh -p 443 -R0:localhost:3389 tcp@a.pinggy.io -o ServerAliveInterval=60 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "echo 'Tunnel active'" 2>&1 | grep -o 'tcp://[a-z0-9-]\+\.pinggy\.io:[0-9]\+')
+          echo "Public RDP URL: $pinggy_url"
+          echo "tunnel_url=$pinggy_url" >> $GITHUB_ENV
         shell: pwsh
