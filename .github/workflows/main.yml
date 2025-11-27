@@ -1,63 +1,23 @@
 name: CI
-
 on: [push, workflow_dispatch]
-
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: windows-latest
     steps:
-    - name: Download ngrok
-      shell: powershell
-      run: Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile ngrok.zip
-
-    - name: Extract ngrok
-      shell: powershell
-      run: Expand-Archive -Path ngrok.zip -DestinationPath . -Force
-
-    - name: Authenticate ngrok
-      shell: powershell
-      run: .\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
-      env:
-        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-
-    - name: Enable Remote Desktop
-      shell: powershell
-      run: |
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-
-    - name: Set runneradmin password
-      shell: powershell
-      run: |
-        $password = ConvertTo-SecureString "P@ssw0rd!" -AsPlainText -Force
-        Set-LocalUser -Name "runneradmin" -Password $password
-
-    - name: Start ngrok TCP tunnel and wait until ready
-      shell: powershell
-      run: |
-        Start-Process -NoNewWindow -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389"
-        Write-Host "Waiting for ngrok tunnel..."
-        $url = ""
-        for ($i=0; $i -lt 20; $i++) {
-            Start-Sleep -Seconds 2
-            try {
-                $tunnelInfo = Invoke-RestMethod http://127.0.0.1:4040/api/tunnels
-                $tcp = $tunnelInfo.tunnels | Where-Object { $_.proto -eq "tcp" }
-                if ($tcp) {
-                    $url = $tcp.public_url
-                    break
-                }
-            } catch {}
-        }
-        if ($url) {
-            Write-Host "Ngrok TCP tunnel URL: $url"
-        } else {
-            Write-Host "Failed to get ngrok TCP URL"
-        }
-
-    - name: Keep runner alive
-      shell: powershell
-      run: |
-        Write-Host "Runner is now kept alive. Press Ctrl+C to stop."
-        while ($true) { Start-Sleep -Seconds 60 }
+    - name: Download Cloudflare Tunnel
+      run: Invoke-WebRequest https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe -OutFile cloudflared.exe
+    
+    - name: Enable TS
+      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+    
+    - name: Enable Firewall Rule
+      run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+    
+    - name: Enable RDP Authentication
+      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+    
+    - name: Set User Password
+      run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+    
+    - name: Create Tunnel
+      run: .\cloudflared.exe tunnel --no-autoupdate --url tcp://localhost:3389
